@@ -2,7 +2,7 @@
 
 A portable GitHub Actions workflow for AI-assisted pull request review. It runs Kilo Code CLI against each non-draft PR, reconciles prior inline review threads, resolves fixed findings, and posts one inline thread per new finding.
 
-The flow is provider-neutral. Bring your own Kilo model/provider config for OpenAI, Anthropic, xAI, or another provider supported by Kilo.
+The flow is provider-neutral. Bring your own Kilo model/provider config for OpenAI, Anthropic, Grok/xAI, Composer 2.5, or another provider supported by Kilo.
 
 ## What It Includes
 
@@ -47,9 +47,9 @@ skills/github-pr-code-review/SKILL.md
 
 1. Configure GitHub Actions settings:
 
-- Repository variable `KILO_MODEL`: the Kilo model id to run, such as `openai/gpt-5.4-mini`.
+- Repository variable `KILO_MODEL`: the Kilo model id to run, such as `cursor/composer-2.5`.
 - Repository secret `KILO_PROVIDER_CONFIG_JSON`: a JSON object for the Kilo `provider` config.
-- Provider API key secret referenced by that provider config, such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `XAI_API_KEY`.
+- Provider API key secret referenced by that provider config, such as `CURSOR_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `XAI_API_KEY`.
 
 1. Confirm workflow permissions allow PR comments:
 
@@ -120,6 +120,7 @@ Set repository secret `ANTHROPIC_API_KEY`, then set `KILO_PROVIDER_CONFIG_JSON` 
 }
 ```
 
+
 ### Grok / xAI
 
 Set repository variable:
@@ -143,6 +144,42 @@ Set repository secret `XAI_API_KEY`, then set `KILO_PROVIDER_CONFIG_JSON` to:
       "grok-build-0.1": {
         "name": "Grok Build 0.1",
         "tool_call": true
+      }
+    }
+  }
+}
+```
+
+### Cursor Composer 2.5 (via Standard Agents)
+
+Set repository variable:
+
+```text
+KILO_MODEL=cursor/composer-2.5
+```
+
+Set repository secret `CURSOR_API_KEY`, then set `KILO_PROVIDER_CONFIG_JSON` to:
+
+```json
+{
+  "cursor": {
+    "name": "Cursor API via Standard Agents",
+    "npm": "@ai-sdk/openai-compatible",
+    "options": {
+      "baseURL": "https://api-for-cursor.standardagents.ai/opencode/v1",
+      "apiKey": "{env:CURSOR_API_KEY}"
+    },
+    "models": {
+      "composer-2.5": {
+        "name": "Cursor 2.5",
+        "cost": {
+          "input": 0.5,
+          "output": 2.5
+        },
+        "limit": {
+          "context": 200000,
+          "output": 65536
+        }
       }
     }
   }

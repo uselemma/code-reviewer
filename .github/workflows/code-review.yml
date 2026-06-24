@@ -9,10 +9,11 @@ name: Code Review
 # does not flag pre-existing issues in code the latest commits never touched.
 #
 # Required configuration:
-# - Repository variable: KILO_MODEL, for example openai/gpt-5.4-mini or anthropic/claude-sonnet-4-5.
+# - Repository variable: KILO_MODEL, for example cursor/composer-2.5, openai/gpt-5.4-mini,
+#   or anthropic/claude-sonnet-4-5.
 # - Repository secret: KILO_PROVIDER_CONFIG_JSON, a JSON object for Kilo's provider config.
-# - Provider API key secrets referenced by KILO_PROVIDER_CONFIG_JSON, for example OPENAI_API_KEY,
-#   ANTHROPIC_API_KEY, or XAI_API_KEY.
+# - Provider API key secrets referenced by KILO_PROVIDER_CONFIG_JSON, such as CURSOR_API_KEY,
+#   OPENAI_API_KEY, ANTHROPIC_API_KEY, or XAI_API_KEY.
 #
 # Inline comments are posted via the `gh` CLI using the workflow's GITHUB_TOKEN.
 # See: https://kilo.ai/docs/cli
@@ -64,6 +65,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           KILO_MODEL: ${{ vars.KILO_MODEL }}
           KILO_PROVIDER_CONFIG_JSON: ${{ secrets.KILO_PROVIDER_CONFIG_JSON }}
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
