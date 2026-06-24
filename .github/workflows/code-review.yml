@@ -247,7 +247,7 @@ jobs:
               },
               "formatter": False,
               "lsp": False,
-              "instructions": ["REVIEW_AGENTS.md", "skills/code-reviewer/SKILL.md"],
+              "instructions": ["skills/code-reviewer/SKILL.md"],
           }
 
           os.makedirs(os.path.expanduser("~/.config/kilo"), exist_ok=True)

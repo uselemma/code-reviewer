@@ -8,7 +8,6 @@ The flow is provider-neutral. Bring your own Kilo model/provider config for Grok
 
 - `.github/workflows/code-review.yml`: GitHub Actions workflow for PR review.
 - `skills/code-reviewer/SKILL.md`: Review priorities, checklist, and output format.
-- `REVIEW_AGENTS.md`: Minimal repository-local guidance for commands and conventions.
 - `LICENSE`: MIT license.
 
 ## How It Works
@@ -42,10 +41,7 @@ On later pushes, the workflow uses those markers to avoid duplicate threads and 
 ```text
 .github/workflows/code-review.yml
 skills/code-reviewer/SKILL.md
-REVIEW_AGENTS.md
 ```
-
-1. Edit `REVIEW_AGENTS.md` with your repository's lint, type-check, test, generated-code, and framework conventions.
 
 1. Configure GitHub Actions settings:
 
