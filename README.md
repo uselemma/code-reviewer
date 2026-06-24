@@ -45,13 +45,13 @@ skills/code-reviewer/SKILL.md
 skills/github-pr-code-review/SKILL.md
 ```
 
-1. Configure GitHub Actions settings:
+2. Configure GitHub Actions settings:
 
 - Repository variable `KILO_MODEL`: the Kilo model id to run, such as `cursor/composer-2.5`.
 - Repository secret `KILO_PROVIDER_CONFIG_JSON`: a JSON object for the Kilo `provider` config.
 - Provider API key secret referenced by that provider config, such as `CURSOR_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `XAI_API_KEY`.
 
-1. Confirm workflow permissions allow PR comments:
+3. Confirm workflow permissions allow PR comments:
 
 ```yaml
 permissions:
@@ -119,7 +119,6 @@ Set repository secret `ANTHROPIC_API_KEY`, then set `KILO_PROVIDER_CONFIG_JSON` 
   }
 }
 ```
-
 
 ### Grok / xAI
 
