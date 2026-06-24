@@ -2,12 +2,13 @@
 
 A portable GitHub Actions workflow for AI-assisted pull request review. It runs Kilo Code CLI against each non-draft PR, reconciles prior inline review threads, resolves fixed findings, and posts one inline thread per new finding.
 
-The flow is provider-neutral. Bring your own Kilo model/provider config for Grok/xAI, OpenAI, Claude/Anthropic, or another provider supported by Kilo.
+The flow is provider-neutral. Bring your own Kilo model/provider config for OpenAI, Anthropic, xAI, or another provider supported by Kilo.
 
 ## What It Includes
 
 - `.github/workflows/code-review.yml`: GitHub Actions workflow for PR review.
-- `skills/code-reviewer/SKILL.md`: Review priorities, checklist, and output format.
+- `skills/code-reviewer/SKILL.md`: General review priorities, checklist, and output format.
+- `skills/github-pr-code-review/SKILL.md`: GitHub PR orchestration, thread reconciliation, and inline comment posting rules.
 - `LICENSE`: MIT license.
 
 ## How It Works
@@ -19,7 +20,7 @@ flowchart TD
   draftCheck -->|no| checkout["Checkout PR head SHA"]
   checkout --> installKilo["Install Kilo CLI"]
   installKilo --> buildConfig["Write Kilo config from repo settings"]
-  buildConfig --> runSkill["Run code-reviewer skill"]
+  buildConfig --> runSkill["Run github-pr-code-review skill"]
   runSkill --> loadThreads["Load prior review threads"]
   loadThreads --> reviewDiff["Review current PR diff"]
   reviewDiff --> reconcile["Resolve fixed findings and keep valid threads open"]
@@ -41,11 +42,12 @@ On later pushes, the workflow uses those markers to avoid duplicate threads and 
 ```text
 .github/workflows/code-review.yml
 skills/code-reviewer/SKILL.md
+skills/github-pr-code-review/SKILL.md
 ```
 
 1. Configure GitHub Actions settings:
 
-- Repository variable `KILO_MODEL`: the Kilo model id to run, such as `openai/gpt-4.1`.
+- Repository variable `KILO_MODEL`: the Kilo model id to run, such as `openai/gpt-5.4-mini`.
 - Repository secret `KILO_PROVIDER_CONFIG_JSON`: a JSON object for the Kilo `provider` config.
 - Provider API key secret referenced by that provider config, such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `XAI_API_KEY`.
 
@@ -67,7 +69,7 @@ These examples are intentionally not defaults. Pick one provider, set `KILO_MODE
 Set repository variable:
 
 ```text
-KILO_MODEL=openai/gpt-4.1
+KILO_MODEL=openai/gpt-5.4-mini
 ```
 
 Set repository secret `OPENAI_API_KEY`, then set `KILO_PROVIDER_CONFIG_JSON` to:
@@ -81,8 +83,8 @@ Set repository secret `OPENAI_API_KEY`, then set `KILO_PROVIDER_CONFIG_JSON` to:
       "apiKey": "{env:OPENAI_API_KEY}"
     },
     "models": {
-      "gpt-4.1": {
-        "name": "GPT-4.1",
+      "gpt-5.4-mini": {
+        "name": "GPT-5.4 Mini",
         "tool_call": true
       }
     }
@@ -95,7 +97,7 @@ Set repository secret `OPENAI_API_KEY`, then set `KILO_PROVIDER_CONFIG_JSON` to:
 Set repository variable:
 
 ```text
-KILO_MODEL=anthropic/claude-3-5-sonnet-latest
+KILO_MODEL=anthropic/claude-sonnet-4-5
 ```
 
 Set repository secret `ANTHROPIC_API_KEY`, then set `KILO_PROVIDER_CONFIG_JSON` to:
@@ -109,8 +111,8 @@ Set repository secret `ANTHROPIC_API_KEY`, then set `KILO_PROVIDER_CONFIG_JSON` 
       "apiKey": "{env:ANTHROPIC_API_KEY}"
     },
     "models": {
-      "claude-3-5-sonnet-latest": {
-        "name": "Claude 3.5 Sonnet",
+      "claude-sonnet-4-5": {
+        "name": "Claude Sonnet 4.5",
         "tool_call": true
       }
     }
