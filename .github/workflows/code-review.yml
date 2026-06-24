@@ -1,0 +1,285 @@
+name: Code Review
+
+# Invokes the code-reviewer skill on every non-draft PR update, running it through
+# Kilo Code CLI with the provider/model configured by repository settings.
+#
+# Each run reconciles prior inline review threads: resolve addressed suggestions,
+# keep open ones, post new inline threads only. On subsequent reviews, new
+# findings are scoped to the changes introduced since the last review, so the bot
+# does not flag pre-existing issues in code the latest commits never touched.
+#
+# Required configuration:
+# - Repository variable: KILO_MODEL, for example openai/gpt-4.1 or anthropic/claude-3-5-sonnet-latest.
+# - Repository secret: KILO_PROVIDER_CONFIG_JSON, a JSON object for Kilo's provider config.
+# - Provider API key secrets referenced by KILO_PROVIDER_CONFIG_JSON, for example OPENAI_API_KEY,
+#   ANTHROPIC_API_KEY, or XAI_API_KEY.
+#
+# Inline comments are posted via the `gh` CLI using the workflow's GITHUB_TOKEN.
+# See: https://kilo.ai/docs/cli
+#
+# Permission note: this runs `kilo run --auto` with Kilo permission config that
+# denies edits and allows only read-oriented `gh`/`git` shell commands needed for
+# review. A network-blocking sandbox is intentionally not used because the
+# reviewer must reach the GitHub API via `gh` to post inline comments.
+#
+# Manual validation on a test PR:
+# 1. Open a PR with an intentional issue; confirm one inline thread per finding with an ai-code-review marker.
+# 2. Push a fix; confirm the addressed thread is resolved and no duplicate thread opens for the same marker_id.
+# 3. Push from another automation account; confirm the workflow runs on synchronize and reconciles threads.
+# 4. Push with no issues and prior threads resolved; confirm no repeated "no issues found" top-level comment.
+# 5. After a first review, push a commit that touches only file A; confirm new findings are posted only for file A's changes, not for pre-existing issues elsewhere in the PR.
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: code-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: AI Code Review
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the skill can resolve full SHAs for permalinks.
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Install Kilo Code CLI
+        run: |
+          npm install -g @kilocode/cli
+          kilo --version
+
+      - name: Run code review
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KILO_MODEL: ${{ vars.KILO_MODEL }}
+          KILO_PROVIDER_CONFIG_JSON: ${{ secrets.KILO_PROVIDER_CONFIG_JSON }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+        run: |
+          PROMPT=$(cat <<'PROMPT_EOF'
+          /code-reviewer
+
+          Review pull request #${{ github.event.pull_request.number }} in ${{ github.repository }}.
+          Head SHA: ${{ github.event.pull_request.head.sha }}
+
+          This run reconciles prior review threads on every push, including bot commits. Do not stop early because the bot commented before.
+
+          ## Stable finding IDs
+
+          For every finding you may post, compute a stable marker id before posting:
+          - `marker_id = sha256("<relative-file-path>:<one-line issue summary>")` truncated to 12 hex chars, lowercase.
+          - Embed in every inline comment body on its own line: `<!-- ai-code-review: <marker_id> -->`
+          - The one-line issue summary must be stable across runs, using the same wording for the same underlying issue.
+
+          ## Step 1 - Load prior review threads
+
+          Run this GraphQL query via `gh api graphql`, paginating with `after` if `hasNextPage` is true:
+
+          ```graphql
+          query($owner: String!, $repo: String!, $pr: Int!, $after: String) {
+            repository(owner: $owner, name: $repo) {
+              pullRequest(number: $pr) {
+                reviewThreads(first: 100, after: $after) {
+                  pageInfo { hasNextPage endCursor }
+                  nodes {
+                    id
+                    isResolved
+                    path
+                    line
+                    comments(first: 20) {
+                      nodes {
+                        body
+                        author { login }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+          ```
+
+          Variables: `owner` and `repo` from `${{ github.repository }}`, split on `/`; `pr` = ${{ github.event.pull_request.number }}.
+
+          Build a list of **prior findings** from threads whose first comment body contains an `<!-- ai-code-review:` marker. For each thread record:
+          - `thread_id`, the GraphQL node `id`
+          - `isResolved`
+          - `marker_id`, parsed from `<!-- ai-code-review: ... -->` in the body, if present
+          - `path`, `line`, and a short summary from the comment body
+
+          Also run `gh pr view ${{ github.event.pull_request.number }}` for title and description.
+
+          ## Step 2 - Determine review scope
+
+          Decide whether this is an **initial** or **incremental** review based on the prior review threads from Step 1:
+
+          - **Initial review**: there are zero prior review threads on this PR, meaning no thread, resolved or unresolved, carries an `<!-- ai-code-review:` marker. New findings may be posted for anywhere in the PR diff.
+          - **Incremental review**: one or more prior review threads exist. New findings may only be posted for issues that the latest commits explicitly introduced.
+
+          If this is an incremental review, determine the last reviewed commit and the changes added since then:
+
+          1. Fetch prior review comments and their commit anchors:
+
+          ```bash
+          gh api repos/<owner>/<repo>/pulls/${{ github.event.pull_request.number }}/comments --paginate
+          ```
+
+          2. Among comments whose body contains `<!-- ai-code-review:`, pick the one with the most recent `created_at`. Use its `original_commit_id` as `last_reviewed_sha`.
+          3. If no such comment exists or `last_reviewed_sha` cannot be resolved, fall back to treating this run as an initial review.
+          4. Otherwise compute the incremental change set, meaning the files and line ranges introduced by commits pushed since the last review:
+
+          ```bash
+          git diff <last_reviewed_sha>..${{ github.event.pull_request.head.sha }} --name-only
+          git diff <last_reviewed_sha>..${{ github.event.pull_request.head.sha }}
+          ```
+
+          "Latest commits" means all commits pushed since `last_reviewed_sha`, not only the single newest commit. Record the incremental change set; it gates new findings in Step 5.
+
+          ## Step 3 - Review current diff
+
+          Run `gh pr diff ${{ github.event.pull_request.number }} --name-only`, then `gh pr diff ${{ github.event.pull_request.number }}`.
+          Apply the code-reviewer skill priorities, checklist, and output format. Produce a list of **current findings** with severity, file, line, summary, explanation, and `marker_id`. Always review the full PR diff here so prior threads can be reconciled correctly, regardless of review scope.
+
+          ## Step 4 - Reconcile prior threads vs current findings
+
+          Match by `marker_id` first. If a prior thread has no marker, fall back to same `path` plus overlapping line range plus similar summary.
+
+          For each unresolved prior thread:
+          - If no current finding matches, meaning the issue was fixed, removed, or no longer applies, resolve it with:
+
+          ```graphql
+          mutation($threadId: ID!) {
+            resolveReviewThread(input: { threadId: $threadId }) {
+              thread { isResolved }
+            }
+          }
+          ```
+
+          via `gh api graphql -f query='...' -f threadId='<thread_id>'`.
+
+          - If a current finding still matches: leave the thread open and do not post a duplicate comment.
+
+          Reconciliation always runs against the full-diff current findings, so issues fixed by the latest commits are resolved and still-valid prior issues stay open, even when this is an incremental review.
+
+          ## Step 5 - Post new inline comments
+
+          For each current finding whose `marker_id` is not already present on an unresolved prior thread:
+          - Incremental reviews only: skip the finding unless its file and line fall within the incremental change set computed in Step 2. Do not open a new thread for a finding outside the latest changes, even if it is a genuine issue elsewhere in the PR.
+          - Post exactly one inline review comment anchored to the relevant line via `gh api`:
+
+          ```bash
+          gh api repos/<owner>/<repo>/pulls/${{ github.event.pull_request.number }}/comments \
+            -f body="$BODY" \
+            -f commit_id='${{ github.event.pull_request.head.sha }}' \
+            -f path='<relative-file-path>' \
+            -F line=<line-number> \
+            -f side='RIGHT'
+          ```
+
+          Use the head SHA above as `commit_id`, and anchor `line` to a line present in the changed diff for all severities: Critical, High, Medium, and Low. For a multi-line range, also pass `-F start_line=<n>` and `-f start_side='RIGHT'`.
+          - Include in the body: the `<!-- ai-code-review: <marker_id> -->` line, severity label, what is wrong, why it matters, and the smallest suggested fix.
+          - For small self-contained fixes of five lines or fewer in a single location, include a committable GitHub suggestion block in the body.
+          - Never post a monolithic rollup PR comment listing multiple findings.
+
+          If a finding cannot be anchored to a line in the diff, skip posting it and do not fall back to a top-level PR comment for that finding.
+
+          ## Step 6 - No new comments to post
+
+          If there are no new findings to post:
+          - Resolve any remaining unresolved prior review threads that no longer apply.
+          - Do not post a recurring "no issues found" comment on every push.
+          - Only if there are zero prior review threads on this PR, you may post one top-level comment: `**Code review**: No issues found. Checked behavior, tests, organization, code quality, and repository-specific reminders.`
+
+          ## Hard rules
+
+          - Use `gh` CLI, including `gh api graphql`, for all GitHub access. Do not web-fetch.
+          - Never edit files, push commits, create branches, or open/update other PRs.
+          - Never approve, request changes, or merge the PR.
+          - Do not run the full test suite, linter, or type-checker. Run only read-only verification commands when useful; skip expensive or environment-dependent checks and note that in output.
+          - One inline thread per unique finding; never duplicate an open thread for the same `marker_id`.
+          - On subsequent incremental reviews, never open a new inline thread for an issue outside the changes introduced since `last_reviewed_sha`, even if it is a real issue elsewhere in the PR.
+          PROMPT_EOF
+          )
+
+          python3 <<'PY'
+          import json
+          import os
+          import sys
+
+          model = os.environ.get("KILO_MODEL", "").strip()
+          provider_raw = os.environ.get("KILO_PROVIDER_CONFIG_JSON", "").strip()
+
+          if not model:
+              print("::error::Set repository variable KILO_MODEL before running code review.", file=sys.stderr)
+              sys.exit(1)
+
+          if not provider_raw:
+              print("::error::Set repository secret KILO_PROVIDER_CONFIG_JSON before running code review.", file=sys.stderr)
+              sys.exit(1)
+
+          try:
+              provider = json.loads(provider_raw)
+          except json.JSONDecodeError as exc:
+              print(f"::error::KILO_PROVIDER_CONFIG_JSON is not valid JSON: {exc}", file=sys.stderr)
+              sys.exit(1)
+
+          config = {
+              "$schema": "https://app.kilo.ai/config.json",
+              "model": model,
+              "provider": provider,
+              "permission": {
+                  "*": "allow",
+                  "bash": "allow",
+                  "edit": "deny",
+                  "write": "deny",
+              },
+              "formatter": False,
+              "lsp": False,
+              "instructions": ["REVIEW_AGENTS.md", "skills/code-reviewer/SKILL.md"],
+          }
+
+          os.makedirs(os.path.expanduser("~/.config/kilo"), exist_ok=True)
+          with open(os.path.expanduser("~/.config/kilo/opencode.jsonc"), "w", encoding="utf-8") as handle:
+              json.dump(config, handle, indent=2)
+              handle.write("\n")
+          PY
+
+          set -o pipefail
+          REVIEW_OUTPUT="$(mktemp)"
+          kilo run --auto \
+            --model "$KILO_MODEL" \
+            --format json \
+            "$PROMPT" | tee "$REVIEW_OUTPUT"
+
+          python3 - "$REVIEW_OUTPUT" <<'PY'
+          import json
+          import sys
+
+          failed = False
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              for line in handle:
+                  line = line.strip()
+                  if not line:
+                      continue
+                  try:
+                      event = json.loads(line)
+                  except json.JSONDecodeError:
+                      continue
+                  if event.get("type") == "error":
+                      print(f"::error::Kilo review emitted error event: {event}", file=sys.stderr)
+                      failed = True
+          if failed:
+              sys.exit(1)
+          PY
